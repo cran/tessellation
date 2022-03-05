@@ -73,7 +73,7 @@ exteriorDelaunayEdges <- function(tessellation){
   # print(A_Bs)
   # unique_edges <- edges[which(table(A_Bs) == 1L), ]
   # print(unique_edges)
-#  edges < unique(edges)
+  #  edges < unique(edges)
   vertices <- unique(vertices)
   # vertices <- points[unique(c(edges)), ]
   # nedges <- nrow(edges)
@@ -87,6 +87,12 @@ exteriorDelaunayEdges <- function(tessellation){
   edges3
 }
 
+volume_under_triangle <- function(x, y, z){
+  sum(z) *
+    (x[1L]*y[2L] - x[2L]*y[1L] + x[2L]*y[3L] -
+       x[3L]*y[2L] + x[3L]*y[1L] - x[1L]*y[3L]) / 6
+}
+
 #' @title Delaunay triangulation
 #' @description Delaunay triangulation (or tessellation) of a set of points.
 #'
@@ -95,9 +101,26 @@ exteriorDelaunayEdges <- function(tessellation){
 #' @param degenerate Boolean, whether to include degenerate tiles
 #' @param exteriorEdges Boolean, for dimension 3 only, whether to return
 #'   the exterior edges (see below)
+#' @param elevation Boolean, only for three-dimensional points; if \code{TRUE},
+#'   the function performs an elevated Delaunay tessellation, using the
+#'   third coordinate of a point for its elevation; see the example
 #'
-#' @return The Delaunay tessellation with many details, in a list. This list
-#'   contains three fields:
+#' @return If the function performs an elevated Delaunay tessellation, then
+#'   the returned value is a list with four fields: \code{mesh}, \code{edges},
+#'   \code{volume}, and \code{surface}. The \code{mesh} field is an object of
+#'   class \code{mesh3d}, ready for plotting with the \strong{rgl} package. The
+#'   \code{edges} field provides the indices of the vertices of the edges, and
+#'   others informations; see \code{\link[Rvcg]{vcgGetEdge}}.
+#'   The \code{volume} field provides the sum of the
+#'   volumes under the Delaunay triangles, that is to say the total volume
+#'   under the triangulated surface. Finally, the \code{surface} field provides
+#'   the sum of the areas of the Delaunay triangles, thus this an approximate
+#'   value of the area of the surface that is triangulated.
+#'   The elevated Delaunay tessellation is built with the help of the
+#'   \strong{interp} package.
+#'
+#' Otherwise, the function returns the Delaunay tessellation with many details,
+#'   in a list. This list contains three fields:
 #' \describe{
 #'   \item{\emph{vertices}}{the vertices (or sites) of the tessellation; these
 #'   are the points passed to the function}
@@ -152,7 +175,17 @@ exteriorDelaunayEdges <- function(tessellation){
 #'
 #' @export
 #' @useDynLib tessellation, .registration = TRUE
-#' @importFrom hash hash
+#' @importFrom hash hash keys
+#' @importFrom rgl tmesh3d
+#' @importFrom interp tri.mesh triangles
+#' @importFrom Rvcg vcgGetEdge
+#'
+#' @note The package provides the functions \code{\link{plotDelaunay2D}} to
+#'   plot a 2D Delaunay tessellation and \code{\link{plotDelaunay3D}} to
+#'   plot a 3D Delaunay tessellation. But there is no function to plot an
+#'   elevated Delaunay tessellation; the examples show how to plot such a
+#'   Delaunay tessellation.
+#'
 #' @seealso \code{\link{getDelaunaySimplicies}}
 #' @examples library(tessellation)
 #' points <- rbind(
@@ -170,9 +203,33 @@ exteriorDelaunayEdges <- function(tessellation){
 #' del$vertices[[1]]
 #' del$tiles[[1]]
 #' del$tilefacets[[1]]
+#'
+#' # an elevated Delaunay tessellation ####
+#' f <- function(x, y){
+#'   dnorm(x) * dnorm(y)
+#' }
+#' x <- y <- seq(-5, 5, length.out = 50)
+#' grd <- expand.grid(x = x, y = y) # grid on the xy-plane
+#' points <- as.matrix(transform( # data (x_i, y_i, z_i)
+#'   grd, z = f(x, y)
+#' ))
+#' del <- delaunay(points, elevation = TRUE)
+#' del[["volume"]] # close to 1, as expected
+#' # plotting
+#' library(rgl)
+#' mesh <- del[["mesh"]]
+#' open3d(windowRect = c(100, 100, 612, 356), zoom = 0.6)
+#' aspect3d(1, 1, 20)
+#' shade3d(mesh, color = "limegreen")
+#' wire3d(mesh)
 delaunay <- function(
-  points, atinfinity = FALSE, degenerate = FALSE, exteriorEdges = FALSE
+  points, atinfinity = FALSE, degenerate = FALSE, exteriorEdges = FALSE,
+  elevation = FALSE
 ){
+  stopifnot(isBoolean(atinfinity))
+  stopifnot(isBoolean(degenerate))
+  stopifnot(isBoolean(exteriorEdges))
+  stopifnot(isBoolean(elevation))
   if(!is.matrix(points) || !is.numeric(points)){
     stop("The `points` argument must be a numeric matrix.", call. = TRUE)
   }
@@ -185,6 +242,91 @@ delaunay <- function(
   }
   if(any(is.na(points))){
     stop("Points with missing values are not allowed.", call. = TRUE)
+  }
+  if(elevation){
+    if(dimension != 3L){
+      stop(
+        "To get an elevated Delaunay tessellation (`elevation=TRUE`), ",
+        "you have to provide three-dimensional points.",
+        call. = TRUE
+      )
+    }
+    # elevations <- points[, 3L]
+    # points <- points[, c(1L, 2L)]
+    # del <- delaunay(
+    #   points[, c(1L, 2L)], atinfinity = atinfinity, degenerate = degenerate,
+    #   exteriorEdges = FALSE, elevation = FALSE
+    # )
+    # cgal <- RCGAL::delaunay(points[, c(1L, 2L)])
+
+    x <- points[, 1L]
+    y <- points[, 2L]
+    x <- (x - min(x)) / diff(range(x))
+    y <- (y - min(y)) / diff(range(y))
+    #xy <- points[, c(1L, 2L)]
+    o <- order(round(x+y, 6L), y-x)
+    xy <- cbind(x, y)[o, ]
+    if(anyDuplicated(xy)){
+      stop("There are some duplicated points.", call. = TRUE)
+    }
+    points <- points[o, ]
+    # xy <- round(points[, c(1L, 2L)], 6)
+    Triangles <- triangles(tri.mesh(xy[, 1L], xy[, 2L]))
+    # dd <- deldir::deldir(points[,1], points[,2], sort = FALSE, round = FALSE)
+
+    # delVertices <- del[["vertices"]]
+    # ids <- vapply(delVertices, `[[`, integer(1L), "id")
+
+    #vertices <- do.call(cbind, lapply(delVertices, `[[`, "point"))
+
+    # vertices <- points[ids, ]
+
+    # triangles <- do.call(rbind, lapply(del[["tiles"]], function(tile){
+    #   indices <- tile[["vertices"]]
+    #   if(tile[["orientation"]] == -1L){
+    #     indices <- indices[c(2L, 1L, 3L)]
+    #   }
+    #   indices
+    # }))
+    # triangles <- cgal$faces
+    Triangles <- Triangles[, 1L:3L]
+    #triangles <- deldir::triMat(dd)
+    vertices <- points
+    mesh <- tmesh3d(
+      vertices = t(vertices),
+      indices = t(Triangles),
+      homogeneous = FALSE
+    )
+    # edges <- t(vapply(del[["tilefacets"]], function(x){
+    #   as.integer(keys(x[["subsimplex"]][["vertices"]]))
+    # }, numeric(2L)))
+    # volumes <- apply(Triangles, 1L, function(trgl){
+    #   trgl <- vertices[trgl, ]
+    #   volume_under_triangle(trgl[, 1L], trgl[, 2L], trgl[, 3L])
+    # })
+    # areas <- apply(Triangles, 1L, function(trgl){
+    #   trgl <- vertices[trgl, ]
+    #   triangleArea(trgl[1L, ], trgl[2L, ], trgl[3L, ])
+    # })
+    volumes_and_areas <- apply(Triangles, 1L, function(trgl){
+      trgl <- vertices[trgl, ]
+      c(
+        volume_under_triangle(trgl[, 1L], trgl[, 2L], trgl[, 3L]),
+        triangleArea(trgl[1L, ], trgl[2L, ], trgl[3L, ])
+      )
+    })
+    out <- list(
+      "mesh"    = mesh,
+      "edges"   = vcgGetEdge(mesh),
+      "volume"  = sum(volumes_and_areas[1L, ]),
+      "surface" = sum(volumes_and_areas[2L, ])
+    )
+    attr(out, "elevation") <- TRUE
+    class(out) <- "delaunay"
+    return(out)
+  }
+  if(anyDuplicated(points)){
+    stop("There are some duplicated points.", call. = TRUE)
   }
   storage.mode(points) <- "double"
   errfile <- tempfile(fileext = ".txt")
@@ -204,8 +346,13 @@ delaunay <- function(
   pointsAsList <- lapply(1L:nrow(points), function(i) points[i, ])
   tiles <- tess[["tiles"]]
   for(i in seq_along(tiles)){
-    simplex <- tiles[[i]][["simplex"]]
+    tile <- tiles[[i]]
+    simplex <- tile[["simplex"]]
     vertices <- simplex[["vertices"]]
+    tess[["tiles"]][[i]] <- c(
+      list("vertices" = vertices),
+      tile
+    )
     tess[["tiles"]][[i]][["simplex"]][["vertices"]] <-
       hash(as.character(vertices), pointsAsList[vertices])
   }
@@ -263,9 +410,16 @@ delaunay <- function(
 #' tess <- delaunay(pts)
 #' getDelaunaySimplicies(tess)
 getDelaunaySimplicies <- function(tessellation, hashes = FALSE){
+  stopifnot(isBoolean(hashes))
   if(!inherits(tessellation, "delaunay")){
     stop(
       "The argument `tessellation` must be an output of the `delaunay` function.",
+      call. = TRUE
+    )
+  }
+  if(isTRUE(attr(tessellation, "elevation"))){
+    stop(
+      "This function is not conceived for elevated Delaunay tessellations.",
       call. = TRUE
     )
   }
@@ -321,6 +475,12 @@ plotDelaunay2D <- function(
   if(!inherits(tessellation, "delaunay")){
     stop(
       "The argument `tessellation` must be an output of the `delaunay` function.",
+      call. = TRUE
+    )
+  }
+  if(isTRUE(attr(tessellation, "elevation"))){
+    stop(
+      "This function is not conceived for elevated Delaunay tessellations.",
       call. = TRUE
     )
   }
@@ -414,9 +574,16 @@ plotDelaunay3D <- function(
   tessellation, color = "distinct", hue = "random", luminosity = "light",
   alpha = 0.3, exteriorEdgesAsTubes = FALSE, tubeRadius, tubeColor
 ){
+  stopifnot(isBoolean(exteriorEdgesAsTubes))
   if(!inherits(tessellation, "delaunay")){
     stop(
       "The argument `tessellation` must be an output of the `delaunay` function.",
+      call. = TRUE
+    )
+  }
+  if(isTRUE(attr(tessellation, "elevation"))){
+    stop(
+      "This function is not conceived for elevated Delaunay tessellations.",
       call. = TRUE
     )
   }
@@ -496,6 +663,12 @@ volume <- function(tessellation){
       call. = TRUE
     )
   }
+  if(isTRUE(attr(tessellation, "elevation"))){
+    stop(
+      "This function is not conceived for elevated Delaunay tessellations.",
+      call. = TRUE
+    )
+  }
   tileVolumes <- vapply(tessellation[["tiles"]], function(tile){
     tile[["simplex"]][["volume"]]
   }, numeric(1L))
@@ -527,6 +700,12 @@ surface <- function(tessellation){
   if(!inherits(tessellation, "delaunay")){
     stop(
       "The argument `tessellation` must be an output of the `delaunay` function.",
+      call. = TRUE
+    )
+  }
+  if(isTRUE(attr(tessellation, "elevation"))){
+    stop(
+      "This function is not conceived for elevated Delaunay tessellations.",
       call. = TRUE
     )
   }
