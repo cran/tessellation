@@ -39,23 +39,28 @@ exteriorDelaunayEdges <- function(tessellation){
   edges <- unique(edges)
   hullfacets <- cxhull(points)[["facets"]]
   edges3 <- list()
-  vertices <- NULL
+  vertices <- matrix(nrow = 0L, ncol = 3L)
+  rnames <- integer(0L)
   for(i in 1L:nrow(edges)){
     edge <- edges[i, ]
-    A <- points[edge[1L], ]
+    idA <- edge[1L]
+    A <- points[idA, ]
     x <- vapply(hullfacets, function(f){
       c(crossprod(f[["normal"]], A)) + f[["offset"]]
     }, numeric(1L))
     Abelongs <- which(abs(x) < prec)
-    B <- points[edge[2L], ]
+    idB <- edge[2L]
+    B <- points[idB, ]
     if(length(Abelongs)){
       x <- vapply(Abelongs, function(j){
         f <- hullfacets[[j]]
         c(crossprod(f[["normal"]], B)) + f[["offset"]]
       }, numeric(1L))
       if(any(abs(x) < prec)){
-        edges3 <- append(edges3, list(Edge3$new(A = A, B = B)))
+        edges3 <-
+          append(edges3, list(Edge3$new(A = A, B = B, idA = idA, idB = idB)))
         vertices <- rbind(vertices, A, B)
+        rnames <- c(rnames, c(idA, idB))
       }
     }
   }
@@ -74,7 +79,9 @@ exteriorDelaunayEdges <- function(tessellation){
   # unique_edges <- edges[which(table(A_Bs) == 1L), ]
   # print(unique_edges)
   #  edges < unique(edges)
-  vertices <- unique(vertices)
+  o <- order(rnames)
+  vertices <- vertices[o, ]
+  rownames(vertices) <- as.character(rnames[o])
   # vertices <- points[unique(c(edges)), ]
   # nedges <- nrow(edges)
   # edges3 <- vector("list", length = nedges)
@@ -83,7 +90,7 @@ exteriorDelaunayEdges <- function(tessellation){
   #   edges3[[i]] <-
   #     Edge3$new(A = points[edge[1L], ], B = points[edge[2L], ])
   # }
-  attr(edges3, "vertices") <- vertices
+  attr(edges3, "vertices") <- unique(vertices)
   edges3
 }
 
@@ -102,31 +109,37 @@ volume_under_triangle <- function(x, y, z){
 #' @param exteriorEdges Boolean, for dimension 3 only, whether to return
 #'   the exterior edges (see below)
 #' @param elevation Boolean, only for three-dimensional points; if \code{TRUE},
-#'   the function performs an elevated Delaunay tessellation, using the
-#'   third coordinate of a point for its elevation; see the example
+#'   the function performs an elevated Delaunay triangulation (also called 2.5D
+#'   Delaunay triangulation), using the third coordinate of a point as its
+#'   elevation; see the example
 #'
 #' @return If the function performs an elevated Delaunay tessellation, then
 #'   the returned value is a list with four fields: \code{mesh}, \code{edges},
 #'   \code{volume}, and \code{surface}. The \code{mesh} field is an object of
 #'   class \code{mesh3d}, ready for plotting with the \strong{rgl} package. The
-#'   \code{edges} field provides the indices of the vertices of the edges, and
-#'   others informations; see \code{\link[Rvcg]{vcgGetEdge}}.
+#'   \code{edges} field is an integer matrix which provides the indices of the
+#'   vertices of the edges, and an indicator of whether an edge is a border
+#'   edge; this matrix is obtained with \code{\link[Rvcg]{vcgGetEdge}}.
 #'   The \code{volume} field provides the sum of the
 #'   volumes under the Delaunay triangles, that is to say the total volume
 #'   under the triangulated surface. Finally, the \code{surface} field provides
-#'   the sum of the areas of the Delaunay triangles, thus this an approximate
+#'   the sum of the areas of the Delaunay triangles, thus this is an approximate
 #'   value of the area of the surface that is triangulated.
 #'   The elevated Delaunay tessellation is built with the help of the
 #'   \strong{interp} package.
 #'
 #' Otherwise, the function returns the Delaunay tessellation with many details,
-#'   in a list. This list contains three fields:
+#'   in a list. This list contains five fields:
 #' \describe{
 #'   \item{\emph{vertices}}{the vertices (or sites) of the tessellation; these
 #'   are the points passed to the function}
-#'   \item{\emph{tiles}}{the tiles of the tessellation (triangles in dimension 2,
-#'   tetrahedra in dimension 3)}
+#'   \item{\emph{tiles}}{the tiles of the tessellation (triangles in dimension
+#'   2, tetrahedra in dimension 3)}
 #'   \item{\emph{tilefacets}}{the facets of the tiles of the tessellation}
+#'   \item{\emph{mesh}}{a 'rgl' mesh (\code{\link[rgl]{mesh3d}} object)}
+#'   \item{\emph{edges}}{a two-columns integer matrix representing the edges,
+#'   each row represents an edge; the two integers of a row are the indices of
+#'   the two points which form the edge.}
 #' }
 #' In dimension 3, the list contains an additional field \emph{exteriorEdges}
 #'   if you set \code{exteriorEdges = TRUE}. This is the list of the exterior
@@ -222,6 +235,33 @@ volume_under_triangle <- function(x, y, z){
 #' aspect3d(1, 1, 20)
 #' shade3d(mesh, color = "limegreen")
 #' wire3d(mesh)
+#'
+#' # another elevated Delaunay triangulation, to check the correctness of
+#' #   the calculated surface ####
+#' library(Rvcg)
+#' library(rgl)
+#' cap <- vcgSphericalCap(angleRad = pi/2, subdivision = 3)
+#' open3d(windowRect = c(100, 100, 612, 356), zoom = 0.6)
+#' shade3d(cap, color = "lawngreen")
+#' wire3d(cap)
+#' # exact value of the surface of the spherical cap:
+#' R <- 1
+#' h <- R * (1 - sin(pi/2/2))
+#' 2 * pi * R * h
+#' # our approximation:
+#' points <- t(cap$vb[-4, ]) # the points on the spherical cap
+#' del <- delaunay(points, elevation = TRUE)
+#' del[["surface"]]
+#' # try to increase `subdivision` in `vcgSphericalCap` to get a
+#' #   better approximation of the true value
+#' # note that 'Rvcg' returns the same result as ours:
+#' vcgArea(cap)
+#' # let's check the volume as well:
+#' pi * h^2 * (R - h/3) # true value
+#' del[["volume"]]
+#' # there's a warning with 'Rvcg':
+#' tryCatch(vcgVolume(cap), warning = function(w) message(w))
+#' suppressWarnings({vcgVolume(cap)})
 delaunay <- function(
   points, atinfinity = FALSE, degenerate = FALSE, exteriorEdges = FALSE,
   elevation = FALSE
@@ -317,7 +357,9 @@ delaunay <- function(
     })
     out <- list(
       "mesh"    = mesh,
-      "edges"   = vcgGetEdge(mesh),
+      "edges"   = `colnames<-`(
+        as.matrix(vcgGetEdge(mesh))[, -3L], c("v1", "v2", "border")
+      ),
       "volume"  = sum(volumes_and_areas[1L, ]),
       "surface" = sum(volumes_and_areas[2L, ])
     )
@@ -357,11 +399,22 @@ delaunay <- function(
       hash(as.character(vertices), pointsAsList[vertices])
   }
   tilefacets <- tess[["tilefacets"]]
-  for(i in seq_along(tilefacets)){
-    subsimplex <- tilefacets[[i]][["subsimplex"]]
-    vertices <- subsimplex[["vertices"]]
-    tess[["tilefacets"]][[i]][["subsimplex"]][["vertices"]] <-
-      hash(as.character(vertices), pointsAsList[vertices])
+  if(dimension == 3L){
+    nTriangles <- length(tilefacets)
+    Triangles <- matrix(NA_integer_, nrow = nTriangles, ncol = 3L)
+    for(i in 1L:nTriangles){
+      subsimplex <- tilefacets[[i]][["subsimplex"]]
+      vertices <- Triangles[i, ] <- subsimplex[["vertices"]]
+      tess[["tilefacets"]][[i]][["subsimplex"]][["vertices"]] <-
+        hash(as.character(vertices), pointsAsList[vertices])
+    }
+  }else{
+    for(i in seq_along(tilefacets)){
+      subsimplex <- tilefacets[[i]][["subsimplex"]]
+      vertices <- subsimplex[["vertices"]]
+      tess[["tilefacets"]][[i]][["subsimplex"]][["vertices"]] <-
+        hash(as.character(vertices), pointsAsList[vertices])
+    }
   }
   attr(tess, "points") <- points
   if(dimension == 3L && exteriorEdges){
@@ -375,6 +428,14 @@ delaunay <- function(
       "A subsimplex volume is nothing but the length of an edge."
     )
   }else if(dimension == 3L){
+    tess[["mesh"]] <- mesh <- tmesh3d(
+      vertices = t(points),
+      indices = t(Triangles)
+    )
+    tess[["edges"]] <- `colnames<-`(
+      as.matrix(vcgGetEdge(mesh))[, c(1L, 2L)],
+      c("v1", "v2")
+    )
     attr(tess[["tiles"]], "info") <-
       "Dimension 3. Tiles are tetrahedra."
     attr(tess[["tilefacets"]], "info") <- paste0(
@@ -595,9 +656,9 @@ plotDelaunay3D <- function(
     )
   }
   simplicies <- getDelaunaySimplicies(tessellation, hashes = TRUE)
-  edges <- unique(do.call(rbind, lapply(simplicies, function(simplex){
-    t(combn(as.integer(keys(simplex)), 2L))
-  })))
+  # edges <- unique(do.call(rbind, lapply(simplicies, function(simplex){
+  #   t(combn(as.integer(keys(simplex)), 2L))
+  # })))
   nsimplicies <- length(simplicies)
   if(!isFALSE(color)){
     color <- match.arg(color, c("random", "distinct"))
@@ -614,6 +675,7 @@ plotDelaunay3D <- function(
       }
     }
   }
+  edges <- tessellation[["edges"]]
   for(i in 1L:nrow(edges)){
     edge <- edges[i, ]
     p1 <- vertices[edge[1L], ]
