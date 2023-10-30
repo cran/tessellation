@@ -8,8 +8,8 @@ plotDelaunay2D(
   tessellation,
   border = "black",
   color = "distinct",
-  hue = "random",
-  luminosity = "light",
+  distinctArgs = list(seedcolors = c("#ff0000", "#00ff00", "#0000ff")),
+  randomArgs = list(hue = "random", luminosity = "bright"),
   lty = par("lty"),
   lwd = par("lwd"),
   ...
@@ -23,11 +23,14 @@ no borders}
 
 \item{color}{controls the filling colors of the triangles, either
 \code{FALSE} for no color, \code{"random"} to use
-\code{\link[randomcoloR]{randomColor}}, or \code{"distinct"} to use
-\code{\link[randomcoloR]{distinctColorPalette}}}
+\code{\link[colorsGen]{randomColor}}, or \code{"distinct"} to use
+\code{\link[Polychrome]{createPalette}}}
 
-\item{hue, luminosity}{if \code{color = "random"}, these arguments are passed
-to \code{\link[randomcoloR]{randomColor}}}
+\item{distinctArgs}{if \code{color = "distinct"}, a list of arguments
+passed to \code{\link[Polychrome]{createPalette}}}
+
+\item{randomArgs}{if \code{color = "random"}, a list of arguments passed
+to \code{\link[colorsGen]{randomColor}}}
 
 \item{lty, lwd}{graphical parameters}
 
@@ -52,7 +55,8 @@ pts <- rbind(square, ptsin)
 d <- delaunay(pts)
 opar <- par(mar = c(0, 0, 0, 0))
 plotDelaunay2D(
-  d, xlab = NA, ylab = NA, asp = 1, color = "random", luminosity = "dark"
+  d, xlab = NA, ylab = NA, asp = 1, color = "random",
+  randomArgs = list(hue = "random", luminosity = "dark")
 )
 par(opar)
 }

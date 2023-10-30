@@ -104,8 +104,10 @@ volume_under_triangle <- function(x, y, z){
 #' @description Delaunay triangulation (or tessellation) of a set of points.
 #'
 #' @param points the points given as a matrix, one point per row
-#' @param atinfinity Boolean, whether to include a point at infinity
-#' @param degenerate Boolean, whether to include degenerate tiles
+#' @param atinfinity Boolean, whether to include a point at infinity;
+#'   ignored if \code{elevation=TRUE}
+#' @param degenerate Boolean, whether to include degenerate tiles;
+#'   ignored if \code{elevation=TRUE}
 #' @param exteriorEdges Boolean, for dimension 3 only, whether to return
 #'   the exterior edges (see below)
 #' @param elevation Boolean, only for three-dimensional points; if \code{TRUE},
@@ -190,7 +192,6 @@ volume_under_triangle <- function(x, y, z){
 #' @useDynLib tessellation, .registration = TRUE
 #' @importFrom hash hash keys
 #' @importFrom rgl tmesh3d
-#' @importFrom interp tri.mesh triangles
 #' @importFrom Rvcg vcgGetEdge
 #'
 #' @note The package provides the functions \code{\link{plotDelaunay2D}} to
@@ -199,7 +200,8 @@ volume_under_triangle <- function(x, y, z){
 #'   elevated Delaunay tessellation; the examples show how to plot such a
 #'   Delaunay tessellation.
 #'
-#' @seealso \code{\link{getDelaunaySimplicies}}
+#' @seealso \code{\link{getDelaunaySimplices}}
+#'
 #' @examples library(tessellation)
 #' points <- rbind(
 #'  c(0.5,0.5,0.5),
@@ -233,16 +235,16 @@ volume_under_triangle <- function(x, y, z){
 #' mesh <- del[["mesh"]]
 #' open3d(windowRect = c(100, 100, 612, 356), zoom = 0.6)
 #' aspect3d(1, 1, 20)
-#' shade3d(mesh, color = "limegreen")
+#' shade3d(mesh, color = "limegreen", polygon_offset = 1)
 #' wire3d(mesh)
 #'
-#' # another elevated Delaunay triangulation, to check the correctness of
-#' #   the calculated surface ####
+#' # another elevated Delaunay triangulation, to check the correctness
+#' #   of the calculated surface and the calculated volume ####
 #' library(Rvcg)
 #' library(rgl)
 #' cap <- vcgSphericalCap(angleRad = pi/2, subdivision = 3)
 #' open3d(windowRect = c(100, 100, 612, 356), zoom = 0.6)
-#' shade3d(cap, color = "lawngreen")
+#' shade3d(cap, color = "lawngreen", polygon_offset = 1)
 #' wire3d(cap)
 #' # exact value of the surface of the spherical cap:
 #' R <- 1
@@ -291,47 +293,41 @@ delaunay <- function(
         call. = TRUE
       )
     }
-    # elevations <- points[, 3L]
-    # points <- points[, c(1L, 2L)]
-    # del <- delaunay(
-    #   points[, c(1L, 2L)], atinfinity = atinfinity, degenerate = degenerate,
-    #   exteriorEdges = FALSE, elevation = FALSE
-    # )
-    # cgal <- RCGAL::delaunay(points[, c(1L, 2L)])
+    del <- delaunay(
+      points[, c(1L, 2L)], atinfinity = FALSE, degenerate = FALSE,
+      exteriorEdges = FALSE, elevation = FALSE
+    )
 
-    x <- points[, 1L]
-    y <- points[, 2L]
-    x <- (x - min(x)) / diff(range(x))
-    y <- (y - min(y)) / diff(range(y))
-    #xy <- points[, c(1L, 2L)]
-    o <- order(round(x+y, 6L), y-x)
-    xy <- cbind(x, y)[o, ]
-    if(anyDuplicated(xy)){
-      stop("There are some duplicated points.", call. = TRUE)
-    }
-    points <- points[o, ]
-    # xy <- round(points[, c(1L, 2L)], 6)
-    Triangles <- triangles(tri.mesh(xy[, 1L], xy[, 2L]))
-    # dd <- deldir::deldir(points[,1], points[,2], sort = FALSE, round = FALSE)
+    # x <- points[, 1L]
+    # y <- points[, 2L]
+    # x <- (x - min(x)) / diff(range(x))
+    # y <- (y - min(y)) / diff(range(y))
+    # #xy <- points[, c(1L, 2L)]
+    # o <- order(round(x+y, 6L), y-x)
+    # xy <- cbind(x, y)[o, ]
+    # if(anyDuplicated(xy)){
+    #   stop("There are some duplicated points.", call. = TRUE)
+    # }
+    # points <- points[o, ]
+    # # xy <- round(points[, c(1L, 2L)], 6)
+    # Triangles <- triangles(tri.mesh(xy[, 1L], xy[, 2L]))
 
-    # delVertices <- del[["vertices"]]
-    # ids <- vapply(delVertices, `[[`, integer(1L), "id")
+    delVertices <- del[["vertices"]]
+    ids <- vapply(delVertices, `[[`, integer(1L), "id")
 
     #vertices <- do.call(cbind, lapply(delVertices, `[[`, "point"))
 
-    # vertices <- points[ids, ]
+    vertices <- points[ids, ]
 
-    # triangles <- do.call(rbind, lapply(del[["tiles"]], function(tile){
-    #   indices <- tile[["vertices"]]
-    #   if(tile[["orientation"]] == -1L){
-    #     indices <- indices[c(2L, 1L, 3L)]
-    #   }
-    #   indices
-    # }))
-    # triangles <- cgal$faces
-    Triangles <- Triangles[, 1L:3L]
-    #triangles <- deldir::triMat(dd)
-    vertices <- points
+    Triangles <- do.call(rbind, lapply(del[["tiles"]], function(tile){
+      indices <- tile[["vertices"]]
+      if(tile[["orientation"]] == -1L){
+        indices <- indices[c(2L, 1L, 3L)]
+      }
+      indices
+    }))
+    # Triangles <- Triangles[, 1L:3L]
+    # vertices <- points
     mesh <- tmesh3d(
       vertices = t(vertices),
       indices = t(Triangles),
@@ -447,15 +443,17 @@ delaunay <- function(
   tess
 }
 
-#' @title Delaunay simplicies
-#' @description Get Delaunay simplicies (tiles).
+#' @title Delaunay simplices
+#' @description Get Delaunay simplices (tiles).
 #'
 #' @param tessellation the output of \code{\link{delaunay}}
-#' @param hashes Boolean, whether to return the simplicies as hash maps
+#' @param hashes Boolean, whether to return the simplices as hash maps
 #'
-#' @return The list of simplicies of the Delaunay tessellation.
+#' @return The list of simplices of the Delaunay tessellation.
 #' @export
 #' @importFrom hash values
+#' @name getDelaunaySimplices
+#' @rdname getDelaunaySimplices
 #'
 #' @examples library(tessellation)
 #' pts <- rbind(
@@ -469,8 +467,8 @@ delaunay <- function(
 #'   c(-5, -5, -10)
 #' )
 #' tess <- delaunay(pts)
-#' getDelaunaySimplicies(tess)
-getDelaunaySimplicies <- function(tessellation, hashes = FALSE){
+#' getDelaunaySimplices(tess)
+getDelaunaySimplices <- function(tessellation, hashes = FALSE){
   stopifnot(isBoolean(hashes))
   if(!inherits(tessellation, "delaunay")){
     stop(
@@ -484,12 +482,19 @@ getDelaunaySimplicies <- function(tessellation, hashes = FALSE){
       call. = TRUE
     )
   }
-  simplicies <-
+  simplices <-
     lapply(lapply(tessellation[["tiles"]], `[[`, "simplex"), `[[`, "vertices")
   if(!hashes){
-    simplicies <- lapply(simplicies, function(simplex) t(values(simplex)))
+    simplices <- lapply(simplices, function(simplex) t(values(simplex)))
   }
-  simplicies
+  simplices
+}
+
+#' @export
+#' @name getDelaunaySimplices
+#' @rdname getDelaunaySimplices
+getDelaunaySimplicies <- function(tessellation, hashes = FALSE) {
+  getDelaunaySimplices(tessellation, hashes)
 }
 
 
@@ -501,16 +506,17 @@ getDelaunaySimplicies <- function(tessellation, hashes = FALSE){
 #'   no borders
 #' @param color controls the filling colors of the triangles, either
 #'   \code{FALSE} for no color, \code{"random"} to use
-#'   \code{\link[randomcoloR]{randomColor}}, or \code{"distinct"} to use
-#'   \code{\link[randomcoloR]{distinctColorPalette}}
-#' @param hue,luminosity if \code{color = "random"}, these arguments are passed
-#'   to \code{\link[randomcoloR]{randomColor}}
+#'   \code{\link[colorsGen]{randomColor}}, or \code{"distinct"} to use
+#'   \code{\link[Polychrome]{createPalette}}
+#' @param distinctArgs if \code{color = "distinct"}, a list of arguments
+#'   passed to \code{\link[Polychrome]{createPalette}}
+#' @param randomArgs if \code{color = "random"}, a list of arguments passed
+#'   to \code{\link[colorsGen]{randomColor}}
 #' @param lty,lwd graphical parameters
 #' @param ... arguments passed to \code{\link{plot}}
 #'
 #' @return No value, just renders a 2D plot.
 #' @export
-#' @importFrom randomcoloR randomColor distinctColorPalette
 #' @importFrom hash keys values
 #' @importFrom graphics plot polygon par segments
 #'
@@ -526,12 +532,15 @@ getDelaunaySimplicies <- function(tessellation, hashes = FALSE){
 #' d <- delaunay(pts)
 #' opar <- par(mar = c(0, 0, 0, 0))
 #' plotDelaunay2D(
-#'   d, xlab = NA, ylab = NA, asp = 1, color = "random", luminosity = "dark"
+#'   d, xlab = NA, ylab = NA, asp = 1, color = "random",
+#'   randomArgs = list(hue = "random", luminosity = "dark")
 #' )
 #' par(opar)
 plotDelaunay2D <- function(
-  tessellation, border = "black", color = "distinct", hue = "random",
-  luminosity = "light", lty = par("lty"), lwd = par("lwd"), ...
+  tessellation, border = "black", color = "distinct",
+  distinctArgs = list(seedcolors = c("#ff0000", "#00ff00", "#0000ff")),
+  randomArgs = list(hue = "random", luminosity = "bright"),
+  lty = par("lty"), lwd = par("lwd"), ...
 ){
   if(!inherits(tessellation, "delaunay")){
     stop(
@@ -555,15 +564,15 @@ plotDelaunay2D <- function(
   plot(vertices, type = "n", ...)
   if(!isFALSE(color)){
     color <- match.arg(color, c("random", "distinct"))
-    simplicies <- getDelaunaySimplicies(tessellation, hashes = TRUE)
-    nsimplicies <- length(simplicies)
-    if(color == "random"){
-      colors <- randomColor(nsimplicies, hue = hue, luminosity = luminosity)
-    }else{
-      colors <- distinctColorPalette(nsimplicies)
+    simplices <- getDelaunaySimplices(tessellation, hashes = TRUE)
+    nsimplices <- length(simplices)
+    if(color == "random") {
+      colors <- rcolors(nsimplices, randomArgs)
+    } else {
+      colors <- distinctColors(nsimplices, distinctArgs)
     }
-    for(i in 1L:nsimplicies){
-      triangle <- t(values(simplicies[[i]]))
+    for(i in 1L:nsimplices){
+      triangle <- t(values(simplices[[i]]))
       polygon(triangle, border = NA, col = colors[i])
     }
   }
@@ -592,10 +601,12 @@ plotDelaunay2D <- function(
 #' @param tessellation the output of \code{\link{delaunay}}
 #' @param color controls the filling colors of the tetrahedra, either
 #'   \code{FALSE} for no color, \code{"random"} to use
-#'   \code{\link[randomcoloR]{randomColor}}, or \code{"distinct"} to use
-#'   \code{\link[randomcoloR]{distinctColorPalette}}
-#' @param hue,luminosity if \code{color = "random"}, these arguments are passed
-#'   to \code{\link[randomcoloR]{randomColor}}
+#'   \code{\link[colorsGen]{randomColor}}, or \code{"distinct"} to use
+#'   \code{\link[Polychrome]{createPalette}}
+#' @param distinctArgs if \code{color = "distinct"}, a list of arguments
+#'   passed to \code{\link[Polychrome]{createPalette}}
+#' @param randomArgs if \code{color = "random"}, a list of arguments passed
+#'   to \code{\link[colorsGen]{randomColor}}
 #' @param alpha opacity, number between 0 and 1
 #' @param exteriorEdgesAsTubes Boolean, whether to plot the exterior edges
 #'   as tubes; in order to use this feature, you need to set
@@ -607,7 +618,6 @@ plotDelaunay2D <- function(
 #'
 #' @return No value, just renders a 3D plot.
 #' @export
-#' @importFrom randomcoloR randomColor distinctColorPalette
 #' @importFrom utils combn
 #' @importFrom rgl triangles3d spheres3d
 #' @importFrom hash keys values
@@ -626,13 +636,15 @@ plotDelaunay2D <- function(
 #' tess <- delaunay(pts)
 #' library(rgl)
 #' open3d(windowRect = c(50, 50, 562, 562))
-#' plotDelaunay3D(tess)
-#' open3d(windowRect = c(50, 50, 562, 562))
+#' plotDelaunay3D(tess, color = "random")
+#' \donttest{open3d(windowRect = c(50, 50, 562, 562))
 #' plotDelaunay3D(
 #'   tess, exteriorEdgesAsTubes = TRUE, tubeRadius = 0.3, tubeColor = "yellow"
-#' )
+#' )}
 plotDelaunay3D <- function(
-  tessellation, color = "distinct", hue = "random", luminosity = "light",
+  tessellation, color = "distinct",
+  distinctArgs = list(seedcolors = c("#ff0000", "#00ff00", "#0000ff")),
+  randomArgs = list(hue = "random", luminosity = "bright"),
   alpha = 0.3, exteriorEdgesAsTubes = FALSE, tubeRadius, tubeColor
 ){
   stopifnot(isBoolean(exteriorEdgesAsTubes))
@@ -655,22 +667,24 @@ plotDelaunay3D <- function(
       call. = TRUE
     )
   }
-  simplicies <- getDelaunaySimplicies(tessellation, hashes = TRUE)
-  # edges <- unique(do.call(rbind, lapply(simplicies, function(simplex){
-  #   t(combn(as.integer(keys(simplex)), 2L))
-  # })))
-  nsimplicies <- length(simplicies)
-  if(!isFALSE(color)){
+  # simplices <- getDelaunaySimplices(tessellation, hashes = TRUE)
+  # # edges <- unique(do.call(rbind, lapply(simplices, function(simplex){
+  # #   t(combn(as.integer(keys(simplex)), 2L))
+  # # })))
+  # nsimplices <- length(simplices)
+  if(!isFALSE(color)) {
     color <- match.arg(color, c("random", "distinct"))
-    if(color == "random"){
-      colors <- randomColor(nsimplicies, hue = hue, luminosity = luminosity)
-    }else{
-      colors <- distinctColorPalette(nsimplicies)
+    simplices <- getDelaunaySimplices(tessellation, hashes = TRUE)
+    nsimplices <- length(simplices)
+    if(color == "random") {
+      colors <- rcolors(nsimplices, randomArgs)
+    } else {
+      colors <- distinctColors(nsimplices, distinctArgs)
     }
     triangles <- combn(4L, 3L)
-    for(i in 1L:nsimplicies){
-      simplex <- t(values(simplicies[[i]]))
-      for(j in 1L:4L){
+    for(i in 1L:nsimplices) {
+      simplex <- t(values(simplices[[i]]))
+      for(j in 1L:4L) {
         triangles3d(simplex[triangles[, j], ], color = colors[i], alpha = alpha)
       }
     }

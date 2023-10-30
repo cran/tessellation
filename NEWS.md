@@ -1,3 +1,13 @@
+# tessellation 2.2.0
+
+- Fixed a misspelled word.
+
+- The package does no longer depend on the 'interp' package.
+
+- The package does no longer depend on the 'randomcoloR' package, but it now 
+depends on the packages 'colorsGen' and 'Polychrome'.
+
+
 # tessellation 2.1.3
 
 Fixed a minor mistake in the `plotVoronoiDiagram` function.
